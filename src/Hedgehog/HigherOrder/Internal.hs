@@ -16,6 +16,7 @@ import Control.Monad.Trans.Maybe (MaybeT(..))
 import Data.Functor.Identity (Identity(..))
 import GHC.Generics
 
+import qualified Hedgehog.Gen as Gen
 import Hedgehog.Internal.Gen (GenT(..), Gen)
 import Hedgehog.Internal.Range (Size)
 import qualified Hedgehog.Internal.Seed as Seed
@@ -70,13 +71,30 @@ applyFun2 h a b = h `applyFun` a `applyFun` b
 applyFun3 :: (a :-> b :-> c :-> r) -> a -> b -> c -> r
 applyFun3 h a b c = h `applyFun` a `applyFun` b `applyFun` c
 
+showsPrecFun :: Fun.ShowsPrec r -> Fun.ShowsPrec (a :-> r)
+showsPrecFun showsPrec_ n (MkFun f r) =
+  Fun.showsPrecFun (\m -> showsPrec_ m . unTree r) n f
+
+unTree :: r -> TreeT Maybe_ r -> r
+unTree _ (TreeT (MaybeT (Identity (Just t)))) = nodeValue t
+unTree r _ = r
+
+instance Show b => Show (a :-> b) where
+  showsPrec = showsPrecFun showsPrec
+
+shrinkTree :: TreeT Maybe_ r -> [TreeT Maybe_ r]
+shrinkTree t0 = case (runIdentity . runMaybeT . runTreeT) t0 of
+  Just t -> nodeChildren t
+  Nothing -> []
+
 -- * Cogenerators
 
 newtype CoGen a = CoGen
   { unCoGen :: forall r. LazyGen r -> LazyGen (a Fun.:-> r) }
 
 genFun :: CoGen a -> Gen b -> Gen (a :-> b)
-genFun ca gb = MkFun <$> runLazyGen (unCoGen ca (lazyGen gb)) <*> gb
+genFun ca gb = MkFun <$> gf <*> gb where
+  gf = Gen.shrink (Fun.shrinkFun shrinkTree) (runLazyGen (unCoGen ca (lazyGen gb)))
 
 cogenEmbed :: FunName -> (a -> b) -> CoGen b -> CoGen a
 cogenEmbed fn f (CoGen c) = CoGen (Fun.cogenEmbed fn f c)
@@ -86,6 +104,14 @@ cogenIntegral tn = CoGen (Fun.cogenIntegral tn)
 
 cogenIntegral' :: Integral a => TypeName -> (a -> Integer) -> CoGen a
 cogenIntegral' tn f = CoGen (Fun.cogenIntegral' tn f)
+
+-- | This is equivalent to 'coarbitrary'.
+cogenInteger :: CoGen Integer
+cogenInteger = cogenIntegral "Integer"
+
+-- | This is equivalent to 'coarbitrary'.
+cogenInt :: CoGen Int
+cogenInt = cogenIntegral "Int"
 
 concreteTree :: Show a => Fun.Concrete (NodeT Maybe_ a)
 concreteTree = Fun.Concrete shrink' showsPrec' where
