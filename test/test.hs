@@ -3,12 +3,10 @@
 module Main where
 
 import Hedgehog
-import Hedgehog.Main (defaultMain)
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
 
 import Hedgehog.HigherOrder
-import Hedgehog.HigherOrder.Internal
 
 good :: (Eq a, Show a) => Gen ((a -> a) :-> a) -> Property
 good g = property $ do
